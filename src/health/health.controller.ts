@@ -1,6 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { createClient } from 'redis';
 import { DataSource } from 'typeorm';
+import { config } from '../common/config';
 
 @Controller('health')
 export class HealthController {
@@ -9,13 +10,13 @@ export class HealthController {
   @Get('redis')
   async checkRedis() {
     try {
-      const redis = createClient({ url: process.env.REDIS_URL });
+      const redis = createClient({ url: config.redis.url });
       await redis.connect();
       const pong = await redis.ping();
       await redis.disconnect();
       return { status: 'ok', redis: pong };
     } catch (err) {
-      return { status: 'error', redis: err.message };
+      return { status: 'error', redis: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -25,7 +26,7 @@ export class HealthController {
       const result = await this.dataSource.query('SELECT NOW()');
       return { status: 'ok', database: result[0] };
     } catch (err) {
-      return { status: 'error', database: err.message };
+      return { status: 'error', database: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -34,7 +35,7 @@ export class HealthController {
     return {
       redis: await this.checkRedis(),
       database: await this.checkDatabase(),
-      env: process.env.NODE_ENV,
+      env: config.env,
     };
   }
 }

@@ -1,13 +1,9 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { config } from './common/config';
-import { Job } from './database/entities/job.entity';
-import { DlqModule } from './dlq/dlq.module';
-import { EventsModule } from './events/events.module';
-import { HealthModule } from './health/health.module';
-import { JobsModule } from './jobs/jobs.module';
-import { QueueModule } from './queue/queue.module';
-import { RedisModule } from './redis/redis.module';
+import { config } from '../common/config';
+import { Job } from '../database/entities/job.entity';
+import { RedisModule } from '../redis/redis.module';
+import { WorkerModule } from './worker.module';
 
 @Module({
   imports: [
@@ -24,11 +20,7 @@ import { RedisModule } from './redis/redis.module';
       ssl: config.env === 'production' ? { rejectUnauthorized: false } : false,
     }),
     RedisModule,
-    HealthModule,
-    JobsModule,
-    QueueModule,
-    DlqModule,
-    EventsModule,
+    WorkerModule,
   ],
 })
-export class AppModule {}
+export class WorkerBootstrapModule {}
