@@ -1,6 +1,14 @@
 # Dependencies
 node_modules/
 dist/
+/build
+*.tsbuildinfo
+
+# Client
+client/node_modules/
+client/dist/
+client/build/
+client/*.tsbuildinfo
 
 # Environment variables
 .env
@@ -16,3 +24,7 @@ dist/
 .idea/
 *.swp
 *.swo
+
+# temp directory
+.temp
+.tmp
