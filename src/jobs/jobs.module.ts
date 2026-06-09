@@ -1,6 +1,5 @@
 import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { StructuredLogger } from '../common/logger.service';
 import { Job } from '../database/entities/job.entity';
 import { EventsModule } from '../events/events.module';
 import { HandlerRegistry } from '../handlers/handler.registry';
@@ -16,8 +15,8 @@ import { JobsService } from './jobs.service';
     forwardRef(() => QueueModule),
   ],
   controllers: [JobsController],
-  providers: [JobsService, StructuredLogger, HandlerRegistry],
-  exports: [JobsService, StructuredLogger, HandlerRegistry],
+  providers: [JobsService, HandlerRegistry],
+  exports: [JobsService, HandlerRegistry],
 })
 export class JobsModule implements OnModuleInit {
   constructor(

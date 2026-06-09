@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CommonModule } from '../common/common.module';
 import { config } from '../common/config';
 import { Job } from '../database/entities/job.entity';
 import { RedisModule } from '../redis/redis.module';
@@ -19,6 +20,7 @@ import { WorkerModule } from './worker.module';
       synchronize: config.env !== 'production',
       ssl: config.env === 'production' ? { rejectUnauthorized: false } : false,
     }),
+    CommonModule,
     RedisModule,
     WorkerModule,
   ],
