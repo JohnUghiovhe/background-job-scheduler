@@ -9,6 +9,7 @@ export class TimingWheelQueue {
   private readonly tickMs: number;
   private readonly slotCount: number;
   private slots: QueueJob[][];
+  private nonEmptySlots = new Set<number>();
 
   constructor(tickMs = 1000, slotCount = 3600) {
     this.tickMs = tickMs;
@@ -36,6 +37,7 @@ export class TimingWheelQueue {
     const idx = this.slotIndex(job.scheduledAt, now);
     const slot = this.slots[idx];
     slot.push(job);
+    this.nonEmptySlots.add(idx);
     slot.sort((a, b) => {
       if (a.priority !== b.priority) return a.priority - b.priority;
       return a.createdAt - b.createdAt;
@@ -45,8 +47,8 @@ export class TimingWheelQueue {
   peek(now = Date.now(), starvationMs = 60000): QueueJob | undefined {
     let best: QueueJob | undefined;
     let bestScore = Infinity;
-    for (const slot of this.slots) {
-      for (const job of slot) {
+    for (const idx of this.nonEmptySlots) {
+      for (const job of this.slots[idx]) {
         if (job.scheduledAt > now) continue;
         const eff = this.effectivePriority(job, now, starvationMs);
         const score = eff * 1e15 + job.scheduledAt * 1e3 + job.createdAt;
@@ -68,13 +70,16 @@ export class TimingWheelQueue {
 
   clear(): void {
     this.slots = Array.from({ length: this.slotCount }, () => []);
+    this.nonEmptySlots.clear();
   }
 
   remove(id: string): boolean {
-    for (const slot of this.slots) {
+    for (const slotIdx of this.nonEmptySlots) {
+      const slot = this.slots[slotIdx];
       const idx = slot.findIndex((j) => j.id === id);
       if (idx !== -1) {
         slot.splice(idx, 1);
+        if (slot.length === 0) this.nonEmptySlots.delete(slotIdx);
         return true;
       }
     }

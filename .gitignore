@@ -3,6 +3,8 @@ node_modules/
 dist/
 /build
 *.tsbuildinfo
+tsconfig.tsbuildinfo
+
 
 # Client
 client/node_modules/

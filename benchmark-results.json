@@ -1,19 +1,19 @@
 {
   "insertN": 2000,
-  "popN": { "heap": 500, "timing_wheel": 100 },
+  "popN": 500,
   "iterations": 5,
   "results": {
-    "heap.insert.avgMs": 6.387,
-    "timing_wheel.insert.avgMs": 6.203,
-    "heap.pop.avgMs": 4.024
+    "heap.insert.avgMs": 6.17,
+    "timing_wheel.insert.avgMs": 7.123,
+    "heap.pop.avgMs": 3.93,
+    "timing_wheel.pop.avgMs": 108.827
   },
   "winner": {
-    "insert": "timing_wheel (marginal at n=2000)",
-    "pop": "heap (timing wheel pop is O(slots×jobs) per operation)"
+    "insert": "heap",
+    "pop": "heap"
   },
   "tradeoffs": {
-    "heap": "O(log n) insert/pop; used as the production scheduler",
-    "timing_wheel": "O(1) bucket insert; peek/pop scans all buckets — better when jobs cluster in time windows"
-  },
-  "note": "Run npm run benchmark for latest numbers including timing_wheel.pop"
+    "heap": "O(log n) insert/pop — production scheduler",
+    "timing_wheel": "O(1) bucket insert; pop scans active buckets — suited to time-window-heavy workloads"
+  }
 }

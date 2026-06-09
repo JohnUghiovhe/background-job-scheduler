@@ -51,12 +51,11 @@ const heapPop = bench('heap.pop', () => {
   while (q.size > 0) q.pop(now);
 });
 
-const wheelPopJobs = makeJobs(100, true);
 const wheelPop = bench('timing_wheel.pop', () => {
   const q = new TimingWheelQueue();
-  for (const j of wheelPopJobs) q.insert(j, now);
+  for (const j of popJobs) q.insert(j, now);
   while (q.size > 0) q.pop(now);
-}, 3);
+});
 
 const summary = {
   event: 'benchmark.summary',
