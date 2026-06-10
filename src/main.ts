@@ -7,7 +7,9 @@ import { config } from './common/config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.enableCors({ origin: true });
+  app.enableCors({
+    origin: config.corsOrigin === '*' ? '*' : config.corsOrigin.split(',').map((s) => s.trim()),
+  });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
   const swaggerConfig = new DocumentBuilder()

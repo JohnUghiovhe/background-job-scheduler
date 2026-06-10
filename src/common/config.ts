@@ -10,6 +10,7 @@ dotenv.config({ path: path.resolve(process.cwd(), envFile) });
 
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
+  corsOrigin: process.env.CORS_ORIGIN || '*',
   redis: {
     url: process.env.REDIS_URL || 'redis://localhost:6379',
     db: parseInt(process.env.REDIS_DB || '0', 10),
