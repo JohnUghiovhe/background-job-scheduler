@@ -12,6 +12,7 @@ A production-ready background job scheduler with a **heap-based priority queue**
 - **Distributed locking** — Redis `SET NX EX` prevents double-execution across multiple worker processes
 - **Real-time SSE events** — `GET /events/stream` pushes job updates, stats changes, and DLQ alerts to connected clients
 - **React dashboard** — live-updating UI (Vite + Tailwind CSS v4) with stats cards, job table, DLQ management, and job creation
+- **Handler** — `send_email` is the single working handler (email simulation)
 - **Recurring jobs** — intervals of 1m, 5m, or 1h; automatically spawns a successor on completion
 - **Swagger docs** — auto-generated API documentation at `GET /docs`
 
@@ -63,6 +64,23 @@ Edit `.env` with your password if different from the docker-compose default. The
 
 > `.env` and `.env.production` are gitignored. `NODE_ENV=production` loads `.env.production` instead.
 
+### Environment variables
+
+| Variable | Used by | Default / Example | Purpose |
+|---|---|---|---|
+| `NODE_ENV` | API, worker | `development` | Selects `.env` or `.env.production`; disables TypeORM sync in production |
+| `PORT` | API | `3000` | NestJS HTTP port |
+| `CORS_ORIGIN` | API | `*` locally | Allowed browser origins; use your HTTPS domain in production |
+| `DATABASE_URL` | API, worker | `postgresql://postgres:YOUR_PASSWORD@localhost:5433/job_scheduler_dev` | Full PostgreSQL connection string |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | API, worker | Docker or provider values | Component PostgreSQL connection settings |
+| `REDIS_URL` | API, worker | `redis://localhost:6379` | Redis connection for distributed locks |
+| `REDIS_DB` | API, worker | `0` | Redis logical database |
+| `STARVATION_THRESHOLD_MS` | API, worker | `60000` | Waiting time before a job gains one effective priority level |
+| `DLQ_ALERT_THRESHOLD` | API, worker | `10` | DLQ size that triggers the automatic email alert |
+| `WORKER_POLL_MS` | worker | `500` | Worker polling interval |
+| `JOB_LOCK_TTL_SEC` | worker | `300` | Redis lock TTL for in-flight jobs |
+| `VITE_API_BASE_URL` | client | `/api` | Browser API base path or absolute API URL |
+
 ### 4. Start the API server
 
 ```bash
@@ -87,6 +105,18 @@ npm run client:dev
 
 Vite dev server on `http://localhost:5173`. Proxies `/api` → `localhost:3000`.
 
+## UI Screenshots
+
+The UI is designed around the required evaluation screens:
+
+| Screen | Screenshot |
+|---|---|
+| Dashboard and jobs table | ![Dashboard and jobs table](docs/screenshots/dashboard.png) |
+| Create job form | ![Create job form](docs/screenshots/create-job.png) |
+| Dead-letter queue | ![Dead-letter queue](docs/screenshots/dlq.png) |
+
+These screenshots were captured from the local Vite UI. Start the API, worker, and client before refreshing them for a deployment review.
+
 ## Running Workers
 
 ```bash
@@ -108,6 +138,16 @@ The system uses two in-memory data structures in parallel:
 - **TimingWheelQueue** — time-bucketed (3600 one-second slots) for efficient handling of future-scheduled jobs. A 1-second interval runs `promoteDueJobs()` which queries PostgreSQL for due jobs and inserts them into both queues.
 
 On startup, all `PENDING` + `!inDlq` jobs are loaded from PostgreSQL.
+
+## Assignment Choices
+
+| Requirement | Chosen implementation | Notes |
+|---|---|---|
+| Job handler | Email simulation | Required option; validates recipient/subject, simulates latency and transient failures |
+| Live updates | Server-Sent Events | `GET /events/stream` powers the React client without page refreshes |
+| Alternative scheduler | Timing wheel | Implemented alongside the required heap and benchmarked with `npm run benchmark` |
+
+Only `send_email` is registered — the project adheres to the "pick one handler" assignment requirement.
 
 ## Project Structure
 
@@ -192,7 +232,7 @@ background-job-scheduler/
 | `GET` | `/jobs/types` | Registered handler types |
 | `GET` | `/jobs/:id` | Get job by ID |
 | `POST` | `/jobs/:id/cancel` | Cancel a pending/processing job |
-| `POST` | `/jobs/workflow/report-pipeline` | Create a 3-step DAG pipeline demo |
+
 | `GET` | `/dlq` | List DLQ jobs |
 | `POST` | `/dlq/:id/retry` | Retry a job from DLQ |
 | `GET` | `/events/stream` | SSE event stream (real-time updates) |

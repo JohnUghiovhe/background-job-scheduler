@@ -46,12 +46,10 @@
 │  │  └─────────┘  └──────────┘  └──────┘  └─────────────┘  │  │
 │  └─────────────────────────────────────────────────────────┘  │
 │                                                              │
-│  HandlerRegistry     ┌──────────────┐                        │
-│  ┌─────────────────┐ │ send_email   │                        │
-│  │ type → handler   │ │ generate_   │                        │
-│  │ mapping          │ │ report       │                        │
-│  └─────────────────┘ │ upload_file  │                        │
-│                      └──────────────┘                        │
+  HandlerRegistry                                           │
+│  ┌─────────────────┐                                       │
+│  │ type → handler   │  send_email                           │
+│  └─────────────────┘                                       │
 └──────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────┐
@@ -209,6 +207,30 @@ The system runs two separate Node.js processes sharing the same database and Red
 - `synchronize: true` in non-production — TypeORM auto-creates tables. In production, use `npm run migration:run`.
 - Tunable via env: `WORKER_POLL_MS`, `JOB_LOCK_TTL_SEC`, `STARVATION_THRESHOLD_MS`, `DLQ_ALERT_THRESHOLD`.
 
+| Variable | Process | Purpose |
+|---|---|---|
+| `NODE_ENV` | API, worker | Chooses `.env` vs `.env.production` and production database behavior |
+| `PORT` | API | HTTP listener port for NestJS |
+| `CORS_ORIGIN` | API | Browser origins allowed to call the API |
+| `DATABASE_URL` | API, worker | Preferred PostgreSQL connection string |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | API, worker | PostgreSQL component settings when not using only `DATABASE_URL` |
+| `REDIS_URL`, `REDIS_DB` | API, worker | Redis connection for locks |
+| `STARVATION_THRESHOLD_MS` | API, worker | Milliseconds before waiting jobs gain one effective priority level |
+| `DLQ_ALERT_THRESHOLD` | API, worker | DLQ count that emits the automatic alert email |
+| `WORKER_POLL_MS` | worker | Polling cadence for worker processes |
+| `JOB_LOCK_TTL_SEC` | worker | Redis lock TTL for claimed jobs |
+| `VITE_API_BASE_URL` | client | API base URL used by the browser bundle |
+
+### Assignment Option Choices
+
+The assignment asks for one choice in three areas. This implementation chooses:
+
+| Area | Selected option | Implementation |
+|---|---|---|
+| Job Handler | Email simulation | `send_email` is the single registered handler — adheres to the "pick one" requirement |
+| Live Updates | Server-Sent Events | React consumes `GET /events/stream` through `useEventStream` |
+| Alternative Scheduling Algorithm | Timing wheel | `TimingWheelQueue` is maintained beside the heap and benchmarked against it |
+
 ### Persistence vs In-Memory
 
 | Layer | Storage | Purpose |
@@ -222,13 +244,7 @@ On startup, `QueueService.rebuild()` loads all PENDING + !inDlq jobs into both i
 
 ### DAG Workflow
 
-Jobs declare dependencies via `dependencyIds: UUID[]`. The `dependenciesMet()` check ensures all dependencies are COMPLETED before the job enters the in-memory queue. When a job completes, its dependents are fetched and `maybeEnqueue` is called.
-
-The built-in `report-pipeline` endpoint (`POST /jobs/workflow/report-pipeline`) demonstrates a 3-step chain:
-```
-generate_report → upload_file → send_email
-```
-Each subsequent job depends on the prior one.
+Jobs declare dependencies via `dependencyIds: UUID[]`. The `dependenciesMet()` check ensures all dependencies are COMPLETED before the job enters the in-memory queue. When a job completes, its dependents are fetched and `maybeEnqueue` is called. DAG orchestration is available via the `dependency_ids` field on job creation — no built-in pipeline endpoint is required.
 
 ### Recurring Jobs
 
