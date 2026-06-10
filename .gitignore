@@ -4,6 +4,9 @@ dist/
 /build
 /tsbuildinfo
 
+# Build artefacts
+build/
+tsconfig.build.tsbuildinfo
 
 # Client
 client/node_modules/
@@ -12,7 +15,11 @@ client/build/
 client/*.tsbuildinfo
 client/.temp/
 client/.tmp/
-client/.env*
+client/.env
+client/.env.local
+client/.env.production
+client/.env.*.local
+!client/.env.example
 
 # Environment variables
 .env

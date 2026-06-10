@@ -5,8 +5,8 @@ import { config } from '../common/config';
 import { StructuredLogger } from '../common/logger.service';
 import { Job, JobStatus } from '../database/entities/job.entity';
 import { EventsService } from '../events/events.service';
+import { HandlerRegistry } from '../handlers/handler.registry';
 import { QueueService } from '../queue/queue.service';
-import { handleSendEmail } from '../handlers/email.handler';
 
 @Injectable()
 export class DlqService {
@@ -15,6 +15,7 @@ export class DlqService {
     private readonly queue: QueueService,
     private readonly events: EventsService,
     private readonly logger: StructuredLogger,
+    private readonly handlers: HandlerRegistry,
   ) {}
 
   async findAll(): Promise<Job[]> {
@@ -59,7 +60,13 @@ export class DlqService {
         dlqCount: count,
         threshold: config.scheduler.dlqAlertThreshold,
       });
-      await this.sendDlqAlert(count);
+      await this.sendDlqAlert(count).catch((err) => {
+        this.logger.error('dlq.alert_email_failed', {
+          dlqCount: count,
+          threshold: config.scheduler.dlqAlertThreshold,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
       this.events.emit({
         type: 'dlq.alert',
         message: `DLQ threshold reached: ${count} jobs (threshold: ${config.scheduler.dlqAlertThreshold})`,
@@ -70,7 +77,10 @@ export class DlqService {
 
   /** Simulated alert email when DLQ crosses threshold (default: 10 jobs) */
   private async sendDlqAlert(count: number) {
-    await handleSendEmail({
+    const handler = this.handlers.get('send_email');
+    if (!handler) throw new Error('send_email handler is not registered');
+
+    await handler({
       to: 'ops@dilamme.com',
       subject: `[ALERT] DLQ threshold reached: ${count} jobs`,
       body: `Dead-letter queue has ${count} jobs. Threshold: ${config.scheduler.dlqAlertThreshold}. Investigate immediately.`,

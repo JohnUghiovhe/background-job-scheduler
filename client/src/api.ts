@@ -21,10 +21,6 @@ export const api = {
   createJob: (body: CreateJobInput) =>
     request<Job>('/jobs', { method: 'POST', body: JSON.stringify(body) }),
   cancelJob: (id: string) => request<Job>(`/jobs/${id}/cancel`, { method: 'POST' }),
-  createReportPipeline: () =>
-    request<{ report: Job; upload: Job; email: Job }>('/jobs/workflow/report-pipeline', {
-      method: 'POST',
-    }),
   getDlq: () => request<Job[]>('/dlq'),
   retryDlq: (id: string) => request<Job>(`/dlq/${id}/retry`, { method: 'POST' }),
 };

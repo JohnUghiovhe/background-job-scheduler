@@ -5,6 +5,14 @@
 import { HeapPriorityQueue, QueueJob } from './heap-queue';
 import { TimingWheelQueue } from './timing-wheel-queue';
 
+interface BenchResult {
+  benchmark: string;
+  avgMs: number;
+  opsPerSecond: number;
+  iterations: number;
+  operations: number;
+}
+
 function makeJobs(n: number, due = false): QueueJob[] {
   const now = Date.now();
   return Array.from({ length: n }, (_, i) => ({
@@ -15,16 +23,24 @@ function makeJobs(n: number, due = false): QueueJob[] {
   }));
 }
 
-function bench(name: string, fn: () => void, iterations = 5): number {
+function bench(name: string, operations: number, fn: () => void, iterations = 5): BenchResult {
   const times: number[] = [];
   for (let i = 0; i < iterations; i++) {
     const start = performance.now();
     fn();
     times.push(performance.now() - start);
   }
+
   const avg = times.reduce((a, b) => a + b, 0) / times.length;
-  console.log(JSON.stringify({ benchmark: name, avgMs: avg.toFixed(3), iterations }));
-  return avg;
+  const result = {
+    benchmark: name,
+    avgMs: Number(avg.toFixed(3)),
+    opsPerSecond: Number(((operations / avg) * 1000).toFixed(0)),
+    iterations,
+    operations,
+  };
+  console.log(JSON.stringify(result));
+  return result;
 }
 
 const INSERT_N = 2000;
@@ -35,41 +51,60 @@ const now = Date.now();
 
 console.log(JSON.stringify({ event: 'benchmark.start', insertN: INSERT_N, popN: POP_N }));
 
-const heapInsert = bench('heap.insert', () => {
+const heapInsert = bench('heap.insert', INSERT_N, () => {
   const q = new HeapPriorityQueue();
   for (const j of insertJobs) q.insert(j, now);
 });
 
-const wheelInsert = bench('timing_wheel.insert', () => {
+const wheelInsert = bench('timing_wheel.insert', INSERT_N, () => {
   const q = new TimingWheelQueue();
   for (const j of insertJobs) q.insert(j, now);
 });
 
-const heapPop = bench('heap.pop', () => {
+const heapPop = bench('heap.pop', POP_N, () => {
   const q = new HeapPriorityQueue();
   for (const j of popJobs) q.insert(j, now);
   while (q.size > 0) q.pop(now);
 });
 
-const wheelPop = bench('timing_wheel.pop', () => {
+const wheelPop = bench('timing_wheel.pop', POP_N, () => {
   const q = new TimingWheelQueue();
   for (const j of popJobs) q.insert(j, now);
   while (q.size > 0) q.pop(now);
 });
+
+const heapSizeProbe = new HeapPriorityQueue();
+const wheelSizeProbe = new TimingWheelQueue();
+for (const j of insertJobs) {
+  heapSizeProbe.insert(j, now);
+  wheelSizeProbe.insert(j, now);
+}
 
 const summary = {
   event: 'benchmark.summary',
   insertN: INSERT_N,
   popN: POP_N,
-  insertWinner: heapInsert < wheelInsert ? 'heap' : 'timing_wheel',
-  popWinner: heapPop < wheelPop ? 'heap' : 'timing_wheel',
-  heapInsertMs: heapInsert.toFixed(3),
-  wheelInsertMs: wheelInsert.toFixed(3),
-  heapPopMs: heapPop.toFixed(3),
-  wheelPopMs: wheelPop.toFixed(3),
+  insertWinner: heapInsert.avgMs < wheelInsert.avgMs ? 'heap' : 'timing_wheel',
+  popWinner: heapPop.avgMs < wheelPop.avgMs ? 'heap' : 'timing_wheel',
+  queues: {
+    heap: {
+      insertAvgMs: heapInsert.avgMs,
+      insertOpsPerSecond: heapInsert.opsPerSecond,
+      popAvgMs: heapPop.avgMs,
+      popOpsPerSecond: heapPop.opsPerSecond,
+      sizeAfterInsertProbe: heapSizeProbe.size,
+    },
+    timingWheel: {
+      insertAvgMs: wheelInsert.avgMs,
+      insertOpsPerSecond: wheelInsert.opsPerSecond,
+      popAvgMs: wheelPop.avgMs,
+      popOpsPerSecond: wheelPop.opsPerSecond,
+      sizeAfterInsertProbe: wheelSizeProbe.size,
+    },
+  },
   tradeoffs: {
     heap: 'O(log n) insert/pop, best general-purpose priority ordering',
-    timing_wheel: 'O(1) bucket insert; peek/pop scans buckets — better for dense time schedules',
+    timingWheel: 'O(1) bucket insert; pop scans buckets, better for dense time schedules',
   },
 };
 

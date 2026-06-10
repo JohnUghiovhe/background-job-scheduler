@@ -1,9 +1,11 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JobStatus } from '../database/entities/job.entity';
 import { HandlerRegistry } from '../handlers/handler.registry';
 import { CreateJobDto } from './dto/create-job.dto';
 import { JobsService } from './jobs.service';
 
+@ApiTags('jobs')
 @Controller('jobs')
 export class JobsController {
   constructor(
@@ -12,55 +14,38 @@ export class JobsController {
   ) {}
 
   @Post()
+  @ApiOperation({ summary: 'Create a background job' })
   create(@Body() dto: CreateJobDto) {
     return this.jobs.create(dto);
   }
 
   @Get()
+  @ApiOperation({ summary: 'List jobs, optionally filtered by status' })
   findAll(@Query('status') status?: JobStatus) {
     return this.jobs.findAll(status ? { status } : undefined);
   }
 
   @Get('stats')
+  @ApiOperation({ summary: 'Get job counts by status plus DLQ count' })
   stats() {
     return this.jobs.getStats();
   }
 
   @Get('types')
+  @ApiOperation({ summary: 'List registered job handler types' })
   types() {
     return this.handlers.listTypes();
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'Get a job by id' })
   findOne(@Param('id') id: string) {
     return this.jobs.findOne(id);
   }
 
   @Post(':id/cancel')
+  @ApiOperation({ summary: 'Cancel a pending or processing job' })
   cancel(@Param('id') id: string) {
     return this.jobs.cancel(id);
-  }
-
-  /** DAG demo: Generate Report → Upload File → Send Email */
-  @Post('workflow/report-pipeline')
-  async createReportPipeline() {
-    const report = await this.jobs.create({
-      type: 'generate_report',
-      priority: 2,
-      payload: { reportType: 'monthly_sales' },
-    });
-    const upload = await this.jobs.create({
-      type: 'upload_file',
-      priority: 2,
-      payload: { filePath: '/reports/monthly_sales.pdf' },
-      dependency_ids: [report.id],
-    });
-    const email = await this.jobs.create({
-      type: 'send_email',
-      priority: 1,
-      payload: { to: 'test@gmail.com', subject: 'Monthly Report Ready' },
-      dependency_ids: [upload.id],
-    });
-    return { report, upload, email };
   }
 }

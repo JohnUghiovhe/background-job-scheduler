@@ -45,18 +45,6 @@ export function CreateJobForm({ onCreated }: { onCreated: () => void }) {
     }
   }
 
-  async function runPipeline() {
-    setLoading(true);
-    try {
-      await api.createReportPipeline();
-      onCreated();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Pipeline failed');
-    } finally {
-      setLoading(false);
-    }
-  }
-
   return (
     <form onSubmit={submit} className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/50 p-5">
       <h2 className="text-lg font-semibold">Create Job</h2>
@@ -142,14 +130,6 @@ export function CreateJobForm({ onCreated }: { onCreated: () => void }) {
           className="rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-medium disabled:opacity-50"
         >
           {loading ? 'Creating…' : 'Create Job'}
-        </button>
-        <button
-          type="button"
-          onClick={runPipeline}
-          disabled={loading}
-          className="rounded-lg border border-indigo-500/50 text-indigo-300 hover:bg-indigo-500/10 px-4 py-2 text-sm"
-        >
-          Run DAG Pipeline Demo
         </button>
       </div>
     </form>
