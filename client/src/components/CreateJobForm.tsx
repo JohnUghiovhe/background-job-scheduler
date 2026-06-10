@@ -127,7 +127,7 @@ export function CreateJobForm({ onCreated }: { onCreated: () => void }) {
         <button
           type="submit"
           disabled={loading}
-          className="rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-medium disabled:opacity-50"
+          className="rounded-lg bg-orange-neon hover:brightness-110 px-4 py-2 text-sm font-medium text-black disabled:opacity-50"
         >
           {loading ? 'Creating…' : 'Create Job'}
         </button>

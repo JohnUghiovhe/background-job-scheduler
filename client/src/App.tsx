@@ -69,7 +69,9 @@ export default function App() {
   return (
     <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
       <header>
-        <h1 className="text-2xl font-bold tracking-tight">Background Job Scheduler</h1>
+        <h1 className="text-2xl font-bold tracking-tight">
+          <span className="text-orange-neon">Background</span> Job Scheduler
+        </h1>
         <p className="text-slate-400 text-sm mt-1">
           Dilamme · Live updates via SSE · Heap priority queue with starvation prevention
         </p>
@@ -91,7 +93,7 @@ export default function App() {
             key={t}
             onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm capitalize border-b-2 -mb-px ${
-              tab === t ? 'border-indigo-500 text-indigo-300' : 'border-transparent text-slate-400'
+              tab === t ? 'border-orange-neon text-orange-neon' : 'border-transparent text-slate-400'
             }`}
           >
             {t === 'dlq' ? `DLQ (${dlq.length})` : 'Jobs'}
