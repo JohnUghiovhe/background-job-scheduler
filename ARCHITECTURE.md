@@ -176,13 +176,24 @@ Worker poll loop (every WORKER_POLL_MS = 500ms):
 ## Failure Handling
 
 | Failure Mode | Mechanism | Location |
-|---|---|---|
-| Handler throws | Retry with jittered backoff (max 3) | `worker.service.ts:134-158` |
+|---|---|---|---|
+| Handler throws | Retry with jittered backoff (up to 3 retries; retryCount checked with `>=` before increment) | `worker.service.ts:134-158` |
 | Final retry exhausted | Moves to DLQ (`inDlq=true, status=FAILED`) | `dlq.service.ts:24-36` |
 | DLQ ≥ 10 jobs | Auto-sends alert email to `ops@dilamme.com` | `dlq.service.ts:55-69` |
 | Worker crash mid-job | Lock TTL expires (300s), job sticks at PROCESSING. Manual or scheduled recovery needed. | `redis.service.ts:25-28` |
 | Double execution | Redis `SET NX EX` prevents two workers claiming same job | `worker.service.ts:59-63` |
 | Dependency not met | Job stays in PENDING, never enqueued until all deps COMPLETED | `jobs.service.ts:118-122` |
+
+### Retry Logic
+
+```
+retryCount 0 → handler fails → 0 >= 3? no → increment to 1, delay ~1s
+          1 → handler fails → 1 >= 3? no → increment to 2, delay ~5s
+          2 → handler fails → 2 >= 3? no → increment to 3, delay ~25s
+          3 → handler fails → 3 >= 3? yes → DLQ (retryCount stays 3)
+```
+
+After 3 retry attempts the job moves to DLQ. Manual retry resets `retryCount` to 0. The UI displays the count in the **Attempts** column with a red `Failed (max)` badge at 3 and a pulse animation while the job is retrying.
 
 ## Implementation Modalities
 
@@ -261,5 +272,6 @@ Jobs with an `interval` field (every_1_minute, every_5_minutes, every_1_hour) sp
 
 - React 19 with Vite 6, Tailwind CSS v4 via `@tailwindcss/vite` plugin.
 - Vite proxies `/api` → `localhost:3000`.
-- Components: `Dashboard` (stats cards), `JobsTable` (list + cancel), `DlqView` (DLQ list + retry), `CreateJobForm` (create modal).
+- Components: `Dashboard` (stats cards), `JobsTable` (list + cancel, with Attempts column, status badges, and pulse animation on retry), `DlqView` (DLQ list + retry), `CreateJobForm` (create modal).
+- Theme: Neon orange accent (`--color-orange-neon: #ff7a00`) via Tailwind v4 `@theme` block in `index.css`. Dark background throughout.
 - Real-time updates via SSE, no manual refresh needed.

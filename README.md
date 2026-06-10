@@ -11,10 +11,11 @@ A production-ready background job scheduler with a **heap-based priority queue**
 - **Dead-letter queue** — isolated view of permanently failed jobs; manual retry resets the counter; automatic email alert when threshold (default 10) is crossed
 - **Distributed locking** — Redis `SET NX EX` prevents double-execution across multiple worker processes
 - **Real-time SSE events** — `GET /events/stream` pushes job updates, stats changes, and DLQ alerts to connected clients
-- **React dashboard** — live-updating UI (Vite + Tailwind CSS v4) with stats cards, job table, DLQ management, and job creation
-- **Handler** — `send_email` is the single working handler (email simulation)
+- **React dashboard** — neon-themed live-updating UI (Vite + Tailwind CSS v4) with stats cards, job table, DLQ management, and job creation
+- **Handler** — `send_email` is the single working handler (email simulation with ~10% simulated failure rate)
 - **Recurring jobs** — intervals of 1m, 5m, or 1h; automatically spawns a successor on completion
-- **Swagger docs** — auto-generated API documentation at `GET /docs`
+- **Attempts tracking** — each job tracks retry count; UI shows Attempts column, "Failed (max)" badge at 3 retries, and pulse animation during retry
+- **Swagger docs** — auto-generated API documentation at `GET /docs` (Jobs, Events, DLQ, and Health endpoints)
 
 ## Tech Stack
 
@@ -107,20 +108,20 @@ Vite dev server on `http://localhost:5173`. Proxies `/api` → `localhost:3000`.
 
 ## UI Screenshots
 
-The UI is designed around the required evaluation screens:
+The UI is designed around the required evaluation screens. After starting the API, worker, and client, the live dashboard reflects real-time updates via SSE.
 
 | Screen | Screenshot |
 |---|---|
 | Dashboard and jobs table | ![Dashboard and jobs table](docs/screenshots/dashboard.png) |
-| Create job form | ![Create job form](docs/screenshots/create-job.png) |
+| Create job form | ![Create job form](docs/screenshots/job-queue.png) |
 | Dead-letter queue | ![Dead-letter queue](docs/screenshots/dlq.png) |
 
-These screenshots were captured from the local Vite UI. Start the API, worker, and client before refreshing them for a deployment review.
+> **Note**: Screenshots may show the previous indigo theme. The current UI uses a neon orange accent theme with Tailwind CSS v4. Refresh screenshots after starting the full stack.
 
 ## Running Workers
 
 ```bash
-# Single worker (watch mode)
+# Single worker (builds then watches with node --watch)
 npm run start:worker
 
 # Multiple workers — run in separate terminals
@@ -169,7 +170,7 @@ background-job-scheduler/
 │   │   ├── queue.service.ts       # Dual-queue orchestration
 │   │   └── benchmark.ts           # Heap vs wheel performance benchmark
 │   ├── jobs/
-│   │   ├── jobs.controller.ts     # CRUD + DAG pipeline + stats endpoints
+│   │   ├── jobs.controller.ts     # CRUD + stats endpoints
 │   │   ├── jobs.service.ts        # Job creation, cancellation, stats, recurring
 │   │   └── dto/create-job.dto.ts  # Validation schema
 │   ├── workers/
@@ -215,7 +216,7 @@ background-job-scheduler/
 |---|---|
 | `npm run build` | Clean build (`rimraf dist && nest build`) |
 | `npm run start:dev` | API server (watch mode, port 3000) |
-| `npm run start:worker` | Worker process (watch mode) |
+| `npm run start:worker` | Worker process (builds then watches with `node --watch`) |
 | `npm run start:worker:prod` | Production worker (`node dist/worker.main`) |
 | `npm run benchmark` | Heap vs Timing Wheel benchmark |
 | `npm run migration:run` | Run TypeORM migrations |
@@ -232,7 +233,6 @@ background-job-scheduler/
 | `GET` | `/jobs/types` | Registered handler types |
 | `GET` | `/jobs/:id` | Get job by ID |
 | `POST` | `/jobs/:id/cancel` | Cancel a pending/processing job |
-
 | `GET` | `/dlq` | List DLQ jobs |
 | `POST` | `/dlq/:id/retry` | Retry a job from DLQ |
 | `GET` | `/events/stream` | SSE event stream (real-time updates) |

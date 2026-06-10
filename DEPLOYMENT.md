@@ -434,10 +434,12 @@ pm2 start dist/main.js --name job-scheduler-api --update-env
 # Single worker
 pm2 start dist/worker.main.js --name job-scheduler-worker --update-env
 
-# Scale horizontally (start additional workers)
+# Scale horizontally (start additional workers in separate terminals)
 pm2 start dist/worker.main.js --name job-scheduler-worker-2 --update-env
 pm2 start dist/worker.main.js --name job-scheduler-worker-3 --update-env
 ```
+
+> For development, use `npm run start:worker` which builds then watches with `node --watch`.
 
 ### 5.3 Save the PM2 process list
 
