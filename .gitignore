@@ -2,8 +2,7 @@
 node_modules/
 dist/
 /build
-*.tsbuildinfo
-tsconfig.tsbuildinfo
+/tsbuildinfo
 
 
 # Client
@@ -11,6 +10,9 @@ client/node_modules/
 client/dist/
 client/build/
 client/*.tsbuildinfo
+client/.temp/
+client/.tmp/
+client/.env*
 
 # Environment variables
 .env
@@ -26,6 +28,9 @@ client/*.tsbuildinfo
 .idea/
 *.swp
 *.swo
+
+# Benchmark results (generated)
+benchmark-results.json
 
 # temp directory
 .temp
