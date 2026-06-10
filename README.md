@@ -112,8 +112,9 @@ The UI is designed around the required evaluation screens. After starting the AP
 
 | Screen | Screenshot |
 |---|---|
-| Dashboard and jobs table | ![Dashboard and jobs table](docs/screenshots/dashboard.png) |
-| Create job form | ![Create job form](docs/screenshots/job-queue.png) |
+| Dashboard | ![Dead-letter queue](docs\screenshots\dashboard.png) |
+|  Jobs table  | ![Dashboard and jobs table](docs\screenshots\jobs-table.png) |
+| Create job form | ![Create job form](docs\screenshots\create-job.png) |
 | Dead-letter queue | ![Dead-letter queue](docs/screenshots/dlq.png) |
 
 > **Note**: Screenshots may show the previous indigo theme. The current UI uses a neon orange accent theme with Tailwind CSS v4. Refresh screenshots after starting the full stack.
