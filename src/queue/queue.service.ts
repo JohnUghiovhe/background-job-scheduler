@@ -55,7 +55,7 @@ export class QueueService implements OnModuleInit {
     if (scheduledAt > now) return;
 
     const depsService = await this.getJobsService();
-    if (!(await depsService.dependenciesMet(job))) return;
+    if (depsService && !(await depsService.dependenciesMet(job))) return;
 
     const qj = this.toQueueJob(job);
     this.heap.insert(qj, now, config.scheduler.starvationThresholdMs);
@@ -67,9 +67,8 @@ export class QueueService implements OnModuleInit {
     this.jobsService = svc;
   }
 
-  private async getJobsService(): Promise<JobsService> {
-    if (!this.jobsService) throw new Error('JobsService not wired');
-    return this.jobsService;
+  private async getJobsService(): Promise<JobsService | null> {
+    return this.jobsService ?? null;
   }
 
   remove(id: string) {

@@ -132,17 +132,17 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async handleFailure(job: Job, error: string) {
-    job.retryCount += 1;
     job.lastError = error;
     job.lockedBy = null;
     job.lockedAt = null;
 
-    if (job.retryCount > config.scheduler.maxRetries) {
+    if (job.retryCount >= config.scheduler.maxRetries) {
       this.logger.jobEvent('job.failed', { jobId: job.id, error, final: true });
       await this.dlq.enterDlq(job, error);
       return;
     }
 
+    job.retryCount += 1;
     this.logger.jobEvent('job.retry', {
       jobId: job.id,
       attempt: job.retryCount,
