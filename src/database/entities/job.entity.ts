@@ -40,6 +40,9 @@ export class Job {
   @Column({ type: 'int', default: 0 })
   retryCount!: number;
 
+  @Column({ type: 'int', default: 3 })
+  dlqRetriesLeft!: number;
+
   @Column({ type: 'timestamptz', nullable: true })
   scheduledAt!: Date | null;
 

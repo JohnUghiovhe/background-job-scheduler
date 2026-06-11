@@ -19,16 +19,18 @@ function isRetrying(job: Job): boolean {
   return job.status === 'processing' && job.retryCount > 0;
 }
 
-function isFailedMax(job: Job): boolean {
-  return job.status === 'failed' && job.retryCount >= 3;
+function isFailedMax(job: Job, maxRetries: number): boolean {
+  return job.status === 'failed' && job.retryCount >= maxRetries;
 }
 
 export function JobsTable({
   jobs,
   onCancel,
+  maxRetries = 3,
 }: {
   jobs: Job[];
   onCancel: (id: string) => void;
+  maxRetries?: number;
 }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-800">
@@ -39,7 +41,7 @@ export function JobsTable({
             <th className="px-3 py-2 text-left">Type</th>
             <th className="px-3 py-2 text-left">Priority</th>
             <th className="px-3 py-2 text-left">Status</th>
-            <th className="px-3 py-2 text-left">Attempts</th>
+            <th className="px-3 py-2 text-left">Retries Left</th>
             <th className="px-3 py-2 text-left">Scheduled</th>
             <th className="px-3 py-2 text-left">Interval</th>
             <th className="px-3 py-2 text-left">Created</th>
@@ -47,7 +49,7 @@ export function JobsTable({
           </tr>
         </thead>
         <tbody>
-          {jobs.filter((j) => !j.inDlq).map((job) => (
+          {jobs.map((job) => (
             <tr
               key={job.id}
               className={`border-t border-slate-800 hover:bg-slate-900/50 ${isRetrying(job) ? 'animate-pulse-retry' : ''}`}
@@ -57,11 +59,11 @@ export function JobsTable({
               <td className="px-3 py-2">{PRIORITY_LABEL[job.priority] ?? job.priority}</td>
               <td className="px-3 py-2">
                 <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[job.status]}`}>
-                  {isFailedMax(job) ? 'Failed (max)' : job.status}
+                  {isFailedMax(job, maxRetries) ? 'Failed (max)' : job.status}
                 </span>
               </td>
-              <td className={`px-3 py-2 ${isFailedMax(job) ? 'text-red-400 font-semibold' : ''}`}>
-                {job.retryCount}
+              <td className={`px-3 py-2 ${isFailedMax(job, maxRetries) ? 'text-red-400 font-semibold' : ''}`}>
+                {Math.max(0, maxRetries - job.retryCount)}
               </td>
               <td className="px-3 py-2">{fmt(job.scheduledAt)}</td>
               <td className="px-3 py-2">{job.interval ?? '—'}</td>
@@ -80,7 +82,7 @@ export function JobsTable({
           ))}
         </tbody>
       </table>
-      {jobs.filter((j) => !j.inDlq).length === 0 && (
+      {jobs.length === 0 && (
         <p className="p-6 text-center text-slate-500">No jobs yet</p>
       )}
     </div>

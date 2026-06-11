@@ -104,6 +104,7 @@ export default function App() {
       {tab === 'jobs' ? (
         <JobsTable
           jobs={jobs}
+          maxRetries={stats.maxRetries}
           onCancel={async (id) => {
             await api.cancelJob(id);
             refresh();
@@ -112,6 +113,7 @@ export default function App() {
       ) : (
         <DlqView
           jobs={dlq}
+          maxRetries={stats.maxRetries}
           onRetry={async (id) => {
             await api.retryDlq(id);
             refresh();

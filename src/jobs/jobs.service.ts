@@ -90,7 +90,6 @@ export class JobsService {
       .createQueryBuilder('j')
       .select('j.status', 'status')
       .addSelect('COUNT(*)', 'count')
-      .where('j.inDlq = false')
       .groupBy('j.status')
       .getRawMany();
 
@@ -107,6 +106,7 @@ export class JobsService {
 
     const dlqCount = await this.repo.count({ where: { inDlq: true } });
     stats.dlq = dlqCount;
+    stats.maxRetries = config.scheduler.maxRetries;
     return stats;
   }
 

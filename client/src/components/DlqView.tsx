@@ -3,9 +3,11 @@ import type { Job } from '../types';
 export function DlqView({
   jobs,
   onRetry,
+  maxRetries = 3,
 }: {
   jobs: Job[];
   onRetry: (id: string) => void;
+  maxRetries?: number;
 }) {
   return (
     <div className="space-y-3">
@@ -25,7 +27,7 @@ export function DlqView({
               <div>
                 <p className="font-mono text-xs text-slate-400">{job.id}</p>
                 <p className="font-medium mt-1">
-                  {job.type} · {job.retryCount} retries
+                  {job.type} · {maxRetries} retries — <span className={job.dlqRetriesLeft === 0 ? 'text-red-400' : 'text-purple-300'}>{job.dlqRetriesLeft}</span> left
                 </p>
                 <p className="text-red-400 text-sm mt-2 font-mono break-all">
                   {job.lastError ?? 'Unknown error'}

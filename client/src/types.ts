@@ -7,6 +7,7 @@ export interface Job {
   priority: number;
   status: JobStatus;
   retryCount: number;
+  dlqRetriesLeft: number;
   scheduledAt: string | null;
   interval: string | null;
   lastError: string | null;
@@ -25,6 +26,7 @@ export interface JobStats {
   failed: number;
   cancelled: number;
   dlq: number;
+  maxRetries?: number;
 }
 
 export interface CreateJobInput {

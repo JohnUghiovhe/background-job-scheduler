@@ -28,6 +28,9 @@ export class DlqService {
     job.lastError = error;
     job.lockedBy = null;
     job.lockedAt = null;
+    if (job.dlqRetriesLeft == null) {
+      job.dlqRetriesLeft = config.scheduler.maxRetries;
+    }
     const saved = await this.repo.save(job);
     this.queue.remove(job.id);
     this.logger.jobEvent('dlq.entered', { jobId: job.id, error });
@@ -39,7 +42,11 @@ export class DlqService {
   async manualRetry(id: string): Promise<Job> {
     const job = await this.repo.findOneBy({ id, inDlq: true });
     if (!job) throw new Error(`Job ${id} not in DLQ`);
+    if (job.dlqRetriesLeft <= 0) {
+      throw new Error(`Job ${id} has no remaining DLQ retries`);
+    }
 
+    job.dlqRetriesLeft -= 1;
     job.inDlq = false;
     job.status = JobStatus.PENDING;
     job.retryCount = 0;
