@@ -1,9 +1,8 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { config } from '../common/config';
-import { Job, JobStatus } from '../database/entities/job.entity';
+import { JobData, JobStatus, jobFromHash, jobKey, statusSetKey } from '../jobs/job.interface';
 import { JobsService } from '../jobs/jobs.service';
+import { RedisService } from '../redis/redis.service';
 import { HeapPriorityQueue, QueueJob } from './heap-queue';
 import { TimingWheelQueue } from './timing-wheel-queue';
 
@@ -14,7 +13,7 @@ export class QueueService implements OnModuleInit {
   private scheduledTimer?: ReturnType<typeof setInterval>;
 
   constructor(
-    @InjectRepository(Job) private readonly repo: Repository<Job>,
+    private readonly redis: RedisService,
   ) {}
 
   async onModuleInit() {
@@ -22,22 +21,24 @@ export class QueueService implements OnModuleInit {
     this.scheduledTimer = setInterval(() => this.promoteDueJobs(), 1000);
   }
 
-  private toQueueJob(job: Job): QueueJob {
+  private toQueueJob(job: JobData): QueueJob {
     return {
       id: job.id,
       priority: job.priority,
-      scheduledAt: (job.scheduledAt ?? job.createdAt).getTime(),
-      createdAt: job.createdAt.getTime(),
+      scheduledAt: job.scheduledAt ? new Date(job.scheduledAt).getTime() : Date.now(),
+      createdAt: new Date(job.createdAt).getTime(),
     };
   }
 
   async rebuild() {
-    const pending = await this.repo.find({
-      where: { status: JobStatus.PENDING, inDlq: false },
-    });
+    const ids = await this.redis.smembers(statusSetKey(JobStatus.PENDING));
     this.heap.clear();
     this.timingWheel.clear();
-    for (const job of pending) {
+    for (const id of ids) {
+      const hash = await this.redis.hgetall(jobKey(id));
+      if (!hash) continue;
+      const job = jobFromHash(id, hash);
+      if (job.inDlq) continue;
       await this.maybeEnqueue(job);
     }
   }
@@ -48,10 +49,10 @@ export class QueueService implements OnModuleInit {
     this.timingWheel.insert(qj, now);
   }
 
-  async maybeEnqueue(job: Job) {
+  async maybeEnqueue(job: JobData) {
     if (job.status !== JobStatus.PENDING || job.inDlq) return;
     const now = Date.now();
-    const scheduledAt = (job.scheduledAt ?? job.createdAt).getTime();
+    const scheduledAt = job.scheduledAt ? new Date(job.scheduledAt).getTime() : now;
     if (scheduledAt > now) return;
 
     const depsService = await this.getJobsService();
@@ -85,17 +86,16 @@ export class QueueService implements OnModuleInit {
   }
 
   async promoteDueJobs() {
-    const due = await this.repo
-      .createQueryBuilder('j')
-      .where('j.status = :status', { status: JobStatus.PENDING })
-      .andWhere('j.inDlq = false')
-      .andWhere('(j.scheduledAt IS NULL OR j.scheduledAt <= NOW())')
-      .getMany();
-
-    for (const job of due) {
-      if (!this.heap.has(job.id)) {
-        await this.maybeEnqueue(job);
-      }
+    const ids = await this.redis.smembers(statusSetKey(JobStatus.PENDING));
+    for (const id of ids) {
+      if (this.heap.has(id)) continue;
+      const hash = await this.redis.hgetall(jobKey(id));
+      if (!hash) continue;
+      const job = jobFromHash(id, hash);
+      if (job.inDlq) continue;
+      const scheduledAt = job.scheduledAt ? new Date(job.scheduledAt).getTime() : 0;
+      if (scheduledAt > Date.now()) continue;
+      await this.maybeEnqueue(job);
     }
   }
 

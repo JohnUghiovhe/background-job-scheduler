@@ -1,13 +1,19 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../common/config';
 import { StructuredLogger } from '../common/logger.service';
-import { Job, JobStatus } from '../database/entities/job.entity';
 import { DlqService } from '../dlq/dlq.service';
 import { EventsService } from '../events/events.service';
 import { HandlerRegistry } from '../handlers/handler.registry';
+import {
+  JobData,
+  JobStatus,
+  jobFromHash,
+  jobKey,
+  jobToHash,
+  JOBS_DLQ_SET,
+  statusSetKey,
+} from '../jobs/job.interface';
 import { JobsService } from '../jobs/jobs.service';
 import { QueueService } from '../queue/queue.service';
 import { RedisService } from '../redis/redis.service';
@@ -19,7 +25,6 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
   private timer?: ReturnType<typeof setInterval>;
 
   constructor(
-    @InjectRepository(Job) private readonly repo: Repository<Job>,
     private readonly queue: QueueService,
     private readonly jobs: JobsService,
     private readonly dlq: DlqService,
@@ -63,8 +68,14 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const job = await this.repo.findOneBy({ id: next.id });
-    if (!job || job.inDlq || job.status === JobStatus.CANCELLED) {
+    const hash = await this.redis.hgetall(jobKey(next.id));
+    if (!hash) {
+      await this.redis.releaseLock(lockKey);
+      return;
+    }
+    const job = jobFromHash(next.id, hash);
+
+    if (job.inDlq || job.status === JobStatus.CANCELLED) {
       await this.redis.releaseLock(lockKey);
       return;
     }
@@ -81,11 +92,16 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
 
     job.status = JobStatus.PROCESSING;
     job.lockedBy = this.workerId;
-    job.lockedAt = new Date();
-    job.startedAt = new Date();
-    await this.repo.save(job);
+    job.lockedAt = new Date().toISOString();
+    job.startedAt = new Date().toISOString();
+    job.updatedAt = new Date().toISOString();
+
+    await this.redis.hset(jobKey(job.id), jobToHash(job));
+    await this.redis.srem(statusSetKey(JobStatus.PENDING), job.id);
+    await this.redis.sadd(statusSetKey(JobStatus.PROCESSING), job.id);
+
     this.logger.jobEvent('job.started', { jobId: job.id, workerId: this.workerId });
-    this.events.emit({ type: 'job.updated', job });
+    this.events.emit({ type: 'job.updated', job: job as any });
     await this.jobs.emitStats();
 
     try {
@@ -94,34 +110,43 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
 
       await handler(job.payload);
 
-      const fresh = await this.repo.findOneBy({ id: job.id });
-      if (fresh?.status === JobStatus.CANCELLED) {
-        this.logger.jobEvent('job.cancelled', {
-          jobId: job.id,
-          note: 'Cancelled while processing; handler finished but job not marked completed',
-        });
-        await this.redis.releaseLock(lockKey);
-        await this.jobs.emitStats();
-        return;
+      const freshHash = await this.redis.hgetall(jobKey(job.id));
+      if (freshHash) {
+        const fresh = jobFromHash(job.id, freshHash);
+        if (fresh.status === JobStatus.CANCELLED) {
+          this.logger.jobEvent('job.cancelled', {
+            jobId: job.id,
+            note: 'Cancelled while processing; handler finished but job not marked completed',
+          });
+          await this.redis.releaseLock(lockKey);
+          await this.jobs.emitStats();
+          return;
+        }
       }
 
       job.status = JobStatus.COMPLETED;
-      job.completedAt = new Date();
+      job.completedAt = new Date().toISOString();
       job.lockedBy = null;
       job.lockedAt = null;
       job.lastError = null;
-      const saved = await this.repo.save(job);
-      this.logger.jobEvent('job.completed', { jobId: job.id });
-      this.events.emit({ type: 'job.updated', job: saved });
-      await this.jobs.scheduleRecurring(saved);
+      job.updatedAt = new Date().toISOString();
 
-      const dependents = await this.repo
-        .createQueryBuilder('j')
-        .where('j.status = :status', { status: JobStatus.PENDING })
-        .andWhere(':id = ANY(j.dependencyIds)', { id: job.id })
-        .getMany();
-      for (const dep of dependents) {
-        await this.queue.maybeEnqueue(dep);
+      await this.redis.hset(jobKey(job.id), jobToHash(job));
+      await this.redis.srem(statusSetKey(JobStatus.PROCESSING), job.id);
+      await this.redis.sadd(statusSetKey(JobStatus.COMPLETED), job.id);
+
+      this.logger.jobEvent('job.completed', { jobId: job.id });
+      this.events.emit({ type: 'job.updated', job: job as any });
+      await this.jobs.scheduleRecurring(job);
+
+      const pendingIds = await this.redis.smembers(statusSetKey(JobStatus.PENDING));
+      for (const depId of pendingIds) {
+        const depHash = await this.redis.hgetall(jobKey(depId));
+        if (!depHash) continue;
+        const depJob = jobFromHash(depId, depHash);
+        if (depJob.dependencyIds.includes(job.id)) {
+          await this.queue.maybeEnqueue(depJob);
+        }
       }
     } catch (err) {
       await this.handleFailure(job, err instanceof Error ? err.message : String(err));
@@ -131,10 +156,11 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async handleFailure(job: Job, error: string) {
+  private async handleFailure(job: JobData, error: string) {
     job.lastError = error;
     job.lockedBy = null;
     job.lockedAt = null;
+    job.updatedAt = new Date().toISOString();
 
     if (job.retryCount >= config.scheduler.maxRetries) {
       this.logger.jobEvent('job.failed', { jobId: job.id, error, final: true });
@@ -151,9 +177,13 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
 
     job.status = JobStatus.PENDING;
     const delay = this.jobs.jitteredDelay(job.retryCount - 1);
-    job.scheduledAt = new Date(Date.now() + delay);
-    await this.repo.save(job);
-    this.events.emit({ type: 'job.updated', job });
+    job.scheduledAt = new Date(Date.now() + delay).toISOString();
+
+    await this.redis.hset(jobKey(job.id), jobToHash(job));
+    await this.redis.srem(statusSetKey(JobStatus.PROCESSING), job.id);
+    await this.redis.sadd(statusSetKey(JobStatus.PENDING), job.id);
+
+    this.events.emit({ type: 'job.updated', job: job as any });
 
     setTimeout(() => this.queue.maybeEnqueue(job), delay);
   }

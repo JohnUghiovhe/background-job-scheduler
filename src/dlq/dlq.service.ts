@@ -1,47 +1,73 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { config } from '../common/config';
 import { StructuredLogger } from '../common/logger.service';
-import { Job, JobStatus } from '../database/entities/job.entity';
 import { EventsService } from '../events/events.service';
 import { HandlerRegistry } from '../handlers/handler.registry';
+import {
+  JobData,
+  JobStatus,
+  jobFromHash,
+  jobKey,
+  jobToHash,
+  JOBS_DLQ_SET,
+  statusSetKey,
+} from '../jobs/job.interface';
 import { QueueService } from '../queue/queue.service';
+import { RedisService } from '../redis/redis.service';
 
 @Injectable()
 export class DlqService {
   constructor(
-    @InjectRepository(Job) private readonly repo: Repository<Job>,
+    private readonly redis: RedisService,
     private readonly queue: QueueService,
     private readonly events: EventsService,
     private readonly logger: StructuredLogger,
     private readonly handlers: HandlerRegistry,
   ) {}
 
-  async findAll(): Promise<Job[]> {
-    return this.repo.find({ where: { inDlq: true }, order: { updatedAt: 'DESC' } });
+  async findAll(): Promise<JobData[]> {
+    const ids = await this.redis.smembers(JOBS_DLQ_SET);
+    const jobs: JobData[] = [];
+    for (const id of ids) {
+      const hash = await this.redis.hgetall(jobKey(id));
+      if (hash) {
+        jobs.push(jobFromHash(id, hash));
+      }
+    }
+    jobs.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return jobs;
   }
 
-  async enterDlq(job: Job, error: string): Promise<Job> {
+  async enterDlq(job: JobData, error: string): Promise<JobData> {
     job.inDlq = true;
     job.status = JobStatus.FAILED;
     job.lastError = error;
     job.lockedBy = null;
     job.lockedAt = null;
+    job.updatedAt = new Date().toISOString();
     if (job.dlqRetriesLeft == null) {
       job.dlqRetriesLeft = config.scheduler.maxRetries;
     }
-    const saved = await this.repo.save(job);
+
+    const key = jobKey(job.id);
+    await this.redis.hset(key, jobToHash(job));
+    await this.redis.sadd(JOBS_DLQ_SET, job.id);
+    const prevStatus = JobStatus.PROCESSING;
+    await this.redis.srem(statusSetKey(prevStatus), job.id);
+    await this.redis.sadd(statusSetKey(JobStatus.FAILED), job.id);
+
     this.queue.remove(job.id);
     this.logger.jobEvent('dlq.entered', { jobId: job.id, error });
     await this.checkAlertThreshold();
-    this.events.emit({ type: 'job.updated', job: saved });
-    return saved;
+    this.events.emit({ type: 'job.updated', job: job as any });
+    return job;
   }
 
-  async manualRetry(id: string): Promise<Job> {
-    const job = await this.repo.findOneBy({ id, inDlq: true });
-    if (!job) throw new Error(`Job ${id} not in DLQ`);
+  async manualRetry(id: string): Promise<JobData> {
+    const hash = await this.redis.hgetall(jobKey(id));
+    if (!hash) throw new Error(`Job ${id} not found`);
+    const job = jobFromHash(id, hash);
+    if (!job.inDlq) throw new Error(`Job ${id} not in DLQ`);
     if (job.dlqRetriesLeft <= 0) {
       throw new Error(`Job ${id} has no remaining DLQ retries`);
     }
@@ -53,15 +79,22 @@ export class DlqService {
     job.lastError = null;
     job.lockedBy = null;
     job.lockedAt = null;
-    const saved = await this.repo.save(job);
-    await this.queue.maybeEnqueue(saved);
+    job.updatedAt = new Date().toISOString();
+
+    const key = jobKey(id);
+    await this.redis.hset(key, jobToHash(job));
+    await this.redis.srem(JOBS_DLQ_SET, id);
+    await this.redis.srem(statusSetKey(JobStatus.FAILED), id);
+    await this.redis.sadd(statusSetKey(JobStatus.PENDING), id);
+
+    await this.queue.maybeEnqueue(job);
     this.logger.jobEvent('dlq.retry', { jobId: id });
-    this.events.emit({ type: 'job.updated', job: saved });
-    return saved;
+    this.events.emit({ type: 'job.updated', job: job as any });
+    return job;
   }
 
   private async checkAlertThreshold() {
-    const count = await this.repo.count({ where: { inDlq: true } });
+    const count = await this.redis.scard(JOBS_DLQ_SET);
     if (count >= config.scheduler.dlqAlertThreshold) {
       this.logger.jobEvent('dlq.alert', {
         dlqCount: count,

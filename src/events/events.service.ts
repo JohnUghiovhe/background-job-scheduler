@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { Subject, Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { Job } from '../database/entities/job.entity';
+import { JobData } from '../jobs/job.interface';
 
 export interface JobEvent {
   type: 'job.updated' | 'job.created' | 'stats.updated' | 'dlq.alert';
-  job?: Job;
+  job?: JobData;
   stats?: Record<string, number>;
   message?: string;
 }

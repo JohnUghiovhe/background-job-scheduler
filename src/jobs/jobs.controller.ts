@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { JobStatus } from '../database/entities/job.entity';
 import { HandlerRegistry } from '../handlers/handler.registry';
+import { JobStatus } from './job.interface';
 import { CreateJobDto } from './dto/create-job.dto';
 import { JobsService } from './jobs.service';
 

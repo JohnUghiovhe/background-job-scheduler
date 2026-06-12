@@ -1,6 +1,4 @@
 import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { Job } from '../database/entities/job.entity';
 import { EventsModule } from '../events/events.module';
 import { HandlerRegistry } from '../handlers/handler.registry';
 import { QueueModule } from '../queue/queue.module';
@@ -10,7 +8,6 @@ import { JobsService } from './jobs.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Job]),
     EventsModule,
     forwardRef(() => QueueModule),
   ],
