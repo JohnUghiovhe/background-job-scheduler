@@ -10,7 +10,7 @@ A production-ready background job scheduler with a **heap-based priority queue**
 - **Retry with jittered backoff** — 3 retries at [1s, 5s, 25s] ±20% jitter; final failure routes to DLQ
 - **Dead-letter queue** — isolated view of permanently failed jobs; manual retry resets the counter; automatic email alert when threshold (default 10) is crossed
 - **Distributed locking** — Redis `SET NX EX` prevents double-execution across multiple worker processes
-- **Real-time SSE events** — `GET /events/stream` pushes job updates, stats changes, and DLQ alerts to connected clients
+- **Real-time SSE events** — `GET /events/stream` pushes job updates, stats changes, and DLQ alerts to connected clients; 10s polling fallback if SSE disconnects
 - **React dashboard** — neon-themed live-updating UI (Vite + Tailwind CSS v4) with stats cards, job table, DLQ management, and job creation
 - **Handler** — `send_email` is the single working handler (email simulation with ~10% simulated failure rate)
 - **Recurring jobs** — intervals of 1m, 5m, or 1h; automatically spawns a successor on completion

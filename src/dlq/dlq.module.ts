@@ -1,14 +1,14 @@
 import { Module } from '@nestjs/common';
 import { EventsModule } from '../events/events.module';
-import { HandlerRegistry } from '../handlers/handler.registry';
+import { JobsModule } from '../jobs/jobs.module';
 import { QueueModule } from '../queue/queue.module';
 import { DlqController } from './dlq.controller';
 import { DlqService } from './dlq.service';
 
 @Module({
-  imports: [QueueModule, EventsModule],
+  imports: [QueueModule, EventsModule, JobsModule],
   controllers: [DlqController],
-  providers: [DlqService, HandlerRegistry],
+  providers: [DlqService],
   exports: [DlqService],
 })
 export class DlqModule {}

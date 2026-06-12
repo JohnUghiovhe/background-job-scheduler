@@ -280,6 +280,7 @@ Jobs with an `interval` field (`every_1_minute`, `every_5_minutes`, `every_1_hou
 - `EventsService` wraps an RxJS `Subject<JobEvent>`.
 - The API server exposes `GET /events/stream` (NestJS `@Sse`).
 - The React client consumes via `EventSource` and dispatches to `useEventStream` hook.
+- A 10s polling fallback (`setInterval`) supplements SSE to recover from transient connection drops.
 - Events: `job.created`, `job.updated`, `stats.updated`, `dlq.alert`.
 
 ### Client Architecture
@@ -288,4 +289,4 @@ Jobs with an `interval` field (`every_1_minute`, `every_5_minutes`, `every_1_hou
 - Vite proxies `/api` → `localhost:3000`.
 - Components: `Dashboard` (stats cards), `JobsTable` (list + cancel, with Attempts column, status badges, and pulse animation on retry), `DlqView` (DLQ list + retry), `CreateJobForm` (create modal).
 - Theme: Neon orange accent (`--color-orange-neon: #ff7a00`) via Tailwind v4 `@theme` block in `index.css`. Dark background throughout.
-- Real-time updates via SSE, no manual refresh needed.
+- Real-time updates via SSE with 10s polling fallback, no manual refresh needed.

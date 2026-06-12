@@ -27,6 +27,8 @@ export function useEventStream(handlers: StreamHandlers) {
       }
     };
 
+    es.onerror = () => {};
+
     return () => es.close();
   }, []);
 }
