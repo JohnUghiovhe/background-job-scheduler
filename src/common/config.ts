@@ -13,8 +13,16 @@ function buildRedisUrl(): string {
   const host = process.env.REDIS_HOST || 'localhost';
   const port = process.env.REDIS_PORT || '6379';
   const password = process.env.REDIS_PASSWORD;
-  if (password) return `redis://:${encodeURIComponent(password)}@${host}:${port}`;
-  return `redis://${host}:${port}`;
+  
+  // Check if TLS encryption is enabled
+  const isTls = process.env.REDIS_TLS === 'true';
+  // If TLS is true, use the secure 'rediss://' protocol prefix [source: 0.1.4]
+  const protocol = isTls ? 'rediss' : 'redis';
+
+  if (password) {
+    return `${protocol}://:${encodeURIComponent(password)}@${host}:${port}`;
+  }
+  return `${protocol}://${host}:${port}`;
 }
 
 export const config = {
