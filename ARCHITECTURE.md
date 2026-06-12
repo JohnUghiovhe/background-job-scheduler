@@ -5,15 +5,14 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        Docker Compose                        │
-│  ┌──────────────┐  ┌──────────────────────────────────────┐  │
-│  │   Redis 7     │  │        PostgreSQL 15                 │  │
-│  │  (locks +     │  │  (jobs table, TypeORM, synchronize)  │  │
-│  │   pub/sub)    │  └──────────────────────────────────────┘  │
-│  │  port 6379    │                                           │
-│  └──────┬───────┘                                           │
-└─────────┼───────────────────────────────────────────────────┘
-          │
-┌─────────┴───────────────────────────────────────────────────┐
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │                       Redis 7                          │  │
+│  │  (primary database — hashes, sets, locks, pub/sub)     │  │
+│  │                      port 6379                          │  │
+│  └───────────────────────┬────────────────────────────────┘  │
+└──────────────────────────┼──────────────────────────────────┘
+                           │
+┌──────────────────────────┴───────────────────────────────────┐
 │                    Process 1: API Server                      │
 │              src/main.ts (NestJS HTTP, port 3000)            │
 │                                                              │
@@ -46,10 +45,10 @@
 │  │  └─────────┘  └──────────┘  └──────┘  └─────────────┘  │  │
 │  └─────────────────────────────────────────────────────────┘  │
 │                                                              │
-  HandlerRegistry                                           │
-│  ┌─────────────────┐                                       │
-│  │ type → handler   │  send_email                           │
-│  └─────────────────┘                                       │
+│  HandlerRegistry                                              │
+│  ┌─────────────────┐                                          │
+│  │ type → handler   │  send_email                             │
+│  └─────────────────┘                                          │
 └──────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────┐
@@ -79,8 +78,10 @@ POST /jobs  ──→  JobsController.create()
                JobsService.create()
                      │
                      ├── validates type against HandlerRegistry
-                     ├── validates dependency_ids exist
-                     ├── saves Job (status=PENDING) via TypeORM
+                     ├── validates dependency_ids exist (via Redis HGETALL)
+                     ├── saves Job hash via Redis HSET
+                     │   key: job:{id} → all fields as hash
+                     ├── indexes: SADD jobs:all + SADD jobs:status:pending
                      ├── emits 'job.created' SSE event
                      ├── emitStats() → SSE 'stats.updated'
                      │
@@ -107,11 +108,13 @@ Worker poll loop (every WORKER_POLL_MS = 500ms):
                      ├── Redis acquireLock(`job:lock:{id}`, TTL=300s)
                      │   └── if failed → requeue(job), return
                      │
-                     ├── re-fetch Job from DB (check cancelled/DLQ)
+                     ├── read Job hash from Redis (HGETALL)
+                     │   └── check cancelled/DLQ
                      │
                      ├── re-check dependenciesMet()
                      │
                      ├── status = PROCESSING, lockedBy = workerId
+                     │   (HSET + SMOVE to jobs:status:processing)
                      │
                      ├── HandlerRegistry.get(type)(payload)
                      │   └── handler runs (async)
@@ -169,20 +172,21 @@ Worker poll loop (every WORKER_POLL_MS = 500ms):
 - Both structures are kept in-sync: every `maybeEnqueue` and `remove` touches both.
 - `popNext()` reads from the **heap only** (the heap gives O(1) peek of the globally best candidate).
 - A `setInterval` every 1s runs `promoteDueJobs()`:
-  - Queries DB for due PENDING jobs not yet in the heap.
+  - Reads the `jobs:status:pending` Redis set.
+  - For each ID, reads the hash and checks if `scheduledAt ≤ now`.
   - Calls `maybeEnqueue()` which inserts into both structures.
   - This catches jobs that were created with future `scheduledAt` values.
 
 ## Failure Handling
 
 | Failure Mode | Mechanism | Location |
-|---|---|---|---|
-| Handler throws | Retry with jittered backoff (up to 3 retries; retryCount checked with `>=` before increment) | `worker.service.ts:134-158` |
-| Final retry exhausted | Moves to DLQ (`inDlq=true, status=FAILED`) | `dlq.service.ts:24-36` |
-| DLQ ≥ 10 jobs | Auto-sends alert email to `ops@dilamme.com` | `dlq.service.ts:55-69` |
+|---|---|---|
+| Handler throws | Retry with jittered backoff (up to 3 retries; retryCount checked with `>=` before increment) | `worker.service.ts:159-189` |
+| Final retry exhausted | Moves to DLQ (`inDlq=true, status=FAILED`) | `dlq.service.ts:41-64` |
+| DLQ ≥ 10 jobs | Auto-sends alert email to `ops@dilamme.com` | `dlq.service.ts:96-116` |
 | Worker crash mid-job | Lock TTL expires (300s), job sticks at PROCESSING. Manual or scheduled recovery needed. | `redis.service.ts:25-28` |
-| Double execution | Redis `SET NX EX` prevents two workers claiming same job | `worker.service.ts:59-63` |
-| Dependency not met | Job stays in PENDING, never enqueued until all deps COMPLETED | `jobs.service.ts:118-122` |
+| Double execution | Redis `SET NX EX` prevents two workers claiming same job | `worker.service.ts:58-64` |
+| Dependency not met | Job stays in PENDING, never enqueued until all deps COMPLETED | `jobs.service.ts:158-167` |
 
 ### Retry Logic
 
@@ -193,13 +197,13 @@ retryCount 0 → handler fails → 0 >= 3? no → increment to 1, delay ~1s
           3 → handler fails → 3 >= 3? yes → DLQ (retryCount stays 3)
 ```
 
-After 3 retry attempts the job moves to DLQ. Manual retry resets `retryCount` to 0. The UI displays the count in the **Attempts** column with a red `Failed (max)` badge at 3 and a pulse animation while the job is retrying.
+After 3 retry attempts the job moves to DLQ. Manual retry decrements `dlqRetriesLeft`. The UI displays the retry count in the **Attempts** column with a red `Failed (max)` badge at 3 and a pulse animation while the job is retrying.
 
 ## Implementation Modalities
 
 ### Two-Process Architecture
 
-The system runs two separate Node.js processes sharing the same database and Redis:
+The system runs two separate Node.js processes sharing the same Redis instance:
 
 1. **API Server** (`src/main.ts`):
    - Full NestJS HTTP server with middleware, validation pipes, CORS, Swagger.
@@ -208,24 +212,23 @@ The system runs two separate Node.js processes sharing the same database and Red
 
 2. **Worker Process** (`src/worker.main.ts`):
    - `NestFactory.createApplicationContext` — no HTTP listener.
-   - Loads `WorkerBootstrapModule` (stripped-down: TypeORM + Redis + Worker + deps).
+   - Loads `WorkerBootstrapModule` (stripped-down: Redis + Worker + deps).
    - Runs an infinite poll loop, processing one job per tick.
    - Scale horizontally: run multiple instances with `npm run start:worker`.
 
 ### Configuration
 
-- `NODE_ENV=production` loads `.env.production` (Supabase/Upstash) instead of `.env` (local Docker).
-- `synchronize: true` in non-production — TypeORM auto-creates tables. In production, use `npm run migration:run`.
+- `NODE_ENV=production` loads `.env.production` instead of `.env` (local Docker).
+- Redis is the single backend — no PostgreSQL, no TypeORM, no migrations.
 - Tunable via env: `WORKER_POLL_MS`, `JOB_LOCK_TTL_SEC`, `STARVATION_THRESHOLD_MS`, `DLQ_ALERT_THRESHOLD`.
 
 | Variable | Process | Purpose |
 |---|---|---|
-| `NODE_ENV` | API, worker | Chooses `.env` vs `.env.production` and production database behavior |
+| `NODE_ENV` | API, worker | Chooses `.env` vs `.env.production` |
 | `PORT` | API | HTTP listener port for NestJS |
 | `CORS_ORIGIN` | API | Browser origins allowed to call the API |
-| `DATABASE_URL` | API, worker | Preferred PostgreSQL connection string |
-| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | API, worker | PostgreSQL component settings when not using only `DATABASE_URL` |
-| `REDIS_URL`, `REDIS_DB` | API, worker | Redis connection for locks |
+| `REDIS_URL` | API, worker | Full Redis connection string (primary) |
+| `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | API, worker | Redis connection components (fallback) |
 | `STARVATION_THRESHOLD_MS` | API, worker | Milliseconds before waiting jobs gain one effective priority level |
 | `DLQ_ALERT_THRESHOLD` | API, worker | DLQ count that emits the automatic alert email |
 | `WORKER_POLL_MS` | worker | Polling cadence for worker processes |
@@ -242,24 +245,35 @@ The assignment asks for one choice in three areas. This implementation chooses:
 | Live Updates | Server-Sent Events | React consumes `GET /events/stream` through `useEventStream` |
 | Alternative Scheduling Algorithm | Timing wheel | `TimingWheelQueue` is maintained beside the heap and benchmarked against it |
 
-### Persistence vs In-Memory
+### Persistence — Redis as Single Source of Truth
 
 | Layer | Storage | Purpose |
 |---|---|---|
-| PostgreSQL (`jobs` table) | Persistent on disk | Source of truth for all jobs |
+| Redis hashes (`job:{id}`) | In-memory (AOF persisted) | All job fields — the canonical source of truth |
+| Redis sets (`jobs:all`, `jobs:status:*`, `jobs:dlq`) | In-memory | Indexes for listing and filtering jobs |
 | `HeapPriorityQueue` | In-memory (Node.js) | Fast priority-ordered pop for workers |
 | `TimingWheelQueue` | In-memory (Node.js) | Fast scheduled-job bucketing |
-| Redis | In-memory (external) | Distributed locks, eventual pub/sub |
+| Redis locks (`job:lock:{id}`) | In-memory (NX EX) | Distributed locks + eventual pub/sub |
 
-On startup, `QueueService.rebuild()` loads all PENDING + !inDlq jobs into both in-memory structures.
+On startup, `QueueService.rebuild()` reads the `jobs:status:pending` set and loads all eligible jobs into both in-memory structures.
+
+### Redis Key Schema
+
+| Key pattern | Type | Example | Purpose |
+|---|---|---|---|
+| `job:{id}` | Hash | `HSET job:abc type send_email status pending ...` | Stores all job metadata |
+| `jobs:all` | Set | `SADD jobs:all abc` | Master index of all job IDs |
+| `jobs:status:pending` | Set | `SADD jobs:status:pending abc` | Per-status index for fast filtering |
+| `jobs:dlq` | Set | `SADD jobs:dlq abc` | Dead-letter queue index |
+| `job:lock:{id}` | String | `SET job:lock:abc 1 NX EX 300` | Distributed worker lock |
 
 ### DAG Workflow
 
-Jobs declare dependencies via `dependencyIds: UUID[]`. The `dependenciesMet()` check ensures all dependencies are COMPLETED before the job enters the in-memory queue. When a job completes, its dependents are fetched and `maybeEnqueue` is called. DAG orchestration is available via the `dependency_ids` field on job creation — no built-in pipeline endpoint is required.
+Jobs declare dependencies via `dependencyIds: UUID[]`. The `dependenciesMet()` check reads each dependency's hash from Redis and verifies its status is COMPLETED. When a job completes, all pending jobs whose `dependencyIds` include the completed job's ID are found via the `jobs:status:pending` set, and `maybeEnqueue` is called on each. DAG orchestration is available via the `dependency_ids` field on job creation — no built-in pipeline endpoint is required.
 
 ### Recurring Jobs
 
-Jobs with an `interval` field (every_1_minute, every_5_minutes, every_1_hour) spawn a clone with a future `scheduledAt` upon completion. Recurring is opt-in per job.
+Jobs with an `interval` field (`every_1_minute`, `every_5_minutes`, `every_1_hour`) spawn a clone with a future `scheduledAt` upon completion. The new job is written to Redis (HSET + SADD) and enqueued. Recurring is opt-in per job.
 
 ### SSE Event Bus
 

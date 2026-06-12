@@ -1,6 +1,6 @@
 # Background Job Scheduler
 
-A production-ready background job scheduler with a **heap-based priority queue** (starvation-aware), **hierarchical timing wheel** for scheduled dispatch, **DAG workflow** support, and a **dead-letter queue** with automatic alerting. Runs as two independent processes — an API server and one or more workers — sharing PostgreSQL and Redis.
+A production-ready background job scheduler with a **heap-based priority queue** (starvation-aware), **hierarchical timing wheel** for scheduled dispatch, **DAG workflow** support, and a **dead-letter queue** with automatic alerting. Runs as two independent processes — an API server and one or more workers — sharing Redis as the single source of truth.
 
 ## Features
 
@@ -23,9 +23,9 @@ A production-ready background job scheduler with a **heap-based priority queue**
 |---|---|
 | Runtime | Node.js 22+, TypeScript |
 | API framework | NestJS 11 |
-| ORM | TypeORM 0.3 with PostgreSQL 15 |
+| Database / queue backend | Redis 7 (via `node-redis`) — hashes for job storage, sets for indexing |
 | Queue (in-memory) | Custom min-heap + hierarchical timing wheel |
-| Caching / locking | Redis 7 (via `node-redis`) |
+| Locking | Redis `SET NX EX` |
 | Frontend | React 19, Vite 6, Tailwind CSS 4 |
 | Validation | class-validator + class-transformer |
 | Docs | @nestjs/swagger (Swagger UI) |
@@ -34,7 +34,7 @@ A production-ready background job scheduler with a **heap-based priority queue**
 
 - Node.js 22+
 - npm 10+
-- Docker Desktop (for local Redis + PostgreSQL)
+- Docker Desktop (for local Redis)
 - Git
 
 ## Local Development Setup
@@ -53,7 +53,7 @@ cd client && npm install && cd ..
 docker compose up -d
 ```
 
-Starts Redis (port 6379) and PostgreSQL (port 5433).
+Starts Redis (port 6379).
 
 ### 3. Configure environment
 
@@ -61,7 +61,7 @@ Starts Redis (port 6379) and PostgreSQL (port 5433).
 cp .env.example .env
 ```
 
-Edit `.env` with your password if different from the docker-compose default. The defaults match `docker-compose.yml`.
+No PostgreSQL — Redis is the only external dependency. The defaults match `docker-compose.yml`.
 
 > `.env` and `.env.production` are gitignored. `NODE_ENV=production` loads `.env.production` instead.
 
@@ -69,13 +69,13 @@ Edit `.env` with your password if different from the docker-compose default. The
 
 | Variable | Used by | Default / Example | Purpose |
 |---|---|---|---|
-| `NODE_ENV` | API, worker | `development` | Selects `.env` or `.env.production`; disables TypeORM sync in production |
+| `NODE_ENV` | API, worker | `development` | Selects `.env` or `.env.production` |
 | `PORT` | API | `3000` | NestJS HTTP port |
 | `CORS_ORIGIN` | API | `*` locally | Allowed browser origins; use your HTTPS domain in production |
-| `DATABASE_URL` | API, worker | `postgresql://postgres:YOUR_PASSWORD@localhost:5433/job_scheduler_dev` | Full PostgreSQL connection string |
-| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | API, worker | Docker or provider values | Component PostgreSQL connection settings |
-| `REDIS_URL` | API, worker | `redis://localhost:6379` | Redis connection for distributed locks |
-| `REDIS_DB` | API, worker | `0` | Redis logical database |
+| `REDIS_URL` | API, worker | `redis://localhost:6379` | Full Redis connection string (used if set) |
+| `REDIS_HOST` | API, worker | `localhost` | Redis host (used when `REDIS_URL` unset) |
+| `REDIS_PORT` | API, worker | `6379` | Redis port |
+| `REDIS_PASSWORD` | API, worker | _(empty)_ | Redis password |
 | `STARVATION_THRESHOLD_MS` | API, worker | `60000` | Waiting time before a job gains one effective priority level |
 | `DLQ_ALERT_THRESHOLD` | API, worker | `10` | DLQ size that triggers the automatic email alert |
 | `WORKER_POLL_MS` | worker | `500` | Worker polling interval |
@@ -137,9 +137,19 @@ Each worker gets a unique ID (`worker-<random>`). Redis locking ensures no two w
 The system uses two in-memory data structures in parallel:
 
 - **HeapPriorityQueue** — the authoritative pop source. Workers call `QueueService.popNext()` which pops from the min-heap ordered by effective priority, scheduled time, then creation time.
-- **TimingWheelQueue** — time-bucketed (3600 one-second slots) for efficient handling of future-scheduled jobs. A 1-second interval runs `promoteDueJobs()` which queries PostgreSQL for due jobs and inserts them into both queues.
+- **TimingWheelQueue** — time-bucketed (3600 one-second slots) for efficient handling of future-scheduled jobs. A 1-second interval runs `promoteDueJobs()` which scans Redis for due pending jobs and inserts them into both queues.
 
-On startup, all `PENDING` + `!inDlq` jobs are loaded from PostgreSQL.
+On startup, all `PENDING` + `!inDlq` jobs are loaded from Redis into both in-memory structures.
+
+## Redis Key Schema
+
+| Key pattern | Type | Purpose |
+|---|---|---|
+| `job:{id}` | Hash | All job fields (payload as JSON, dates as ISO strings) |
+| `jobs:all` | Set | Index of every job ID |
+| `jobs:status:{status}` | Set | Index of job IDs per status (pending, processing, completed, failed, cancelled) |
+| `jobs:dlq` | Set | Index of DLQ job IDs |
+| `job:lock:{id}` | String | Distributed lock (NX EX, TTL 300s) |
 
 ## Assignment Choices
 
@@ -158,19 +168,17 @@ background-job-scheduler/
 ├── src/
 │   ├── main.ts                    # API server entrypoint (NestJS HTTP, port 3000)
 │   ├── worker.main.ts             # Worker process entrypoint (NestApplicationContext)
-│   ├── app.module.ts              # Root module (API + DB + Queue + Events)
+│   ├── app.module.ts              # Root module (Redis + Queue + Events)
 │   ├── common/
 │   │   ├── config.ts              # Env-driven config (dotenv)
 │   │   └── logger.service.ts      # Structured JSON logger (stdout)
-│   ├── database/
-│   │   ├── entities/job.entity.ts # Job schema (TypeORM)
-│   │   └── typeorm.config.ts      # Migration DataSource
 │   ├── queue/
 │   │   ├── heap-queue.ts          # Min-heap with starvation boost
 │   │   ├── timing-wheel-queue.ts  # Hierarchical timing wheel
 │   │   ├── queue.service.ts       # Dual-queue orchestration
 │   │   └── benchmark.ts           # Heap vs wheel performance benchmark
 │   ├── jobs/
+│   │   ├── job.interface.ts       # JobData interface, enums, Redis serialization
 │   │   ├── jobs.controller.ts     # CRUD + stats endpoints
 │   │   ├── jobs.service.ts        # Job creation, cancellation, stats, recurring
 │   │   └── dto/create-job.dto.ts  # Validation schema
@@ -185,12 +193,13 @@ background-job-scheduler/
 │   │   ├── handler.registry.ts    # type → handler mapping
 │   │   └── email.handler.ts       # send_email with ~10% simulated failure
 │   ├── redis/
-│   │   └── redis.service.ts       # Lock acquire/release, pub/sub
+│   │   ├── redis.service.ts       # CRUD helpers, lock acquire/release, pub/sub
+│   │   └── redis.module.ts        # Global Redis module
 │   ├── events/
 │   │   ├── events.service.ts      # RxJS Subject → SSE
 │   │   └── events.controller.ts   # GET /events/stream
 │   └── health/
-│       └── health.controller.ts   # GET /health, /health/redis, /health/db
+│       └── health.controller.ts   # GET /health, /health/redis
 ├── client/
 │   ├── src/
 │   │   ├── App.tsx                # Main UI (tabs, SSE hook)
@@ -204,7 +213,7 @@ background-job-scheduler/
 │   │       └── CreateJobForm.tsx   # Job creation form
 │   ├── vite.config.ts             # Vite + React + Tailwind + proxy
 │   └── package.json
-├── docker-compose.yml             # Redis 7 + PostgreSQL 15
+├── docker-compose.yml             # Redis 7 (no PostgreSQL)
 ├── .env.example                   # Backend env template
 ├── client/.env.example            # Frontend VITE_ env template
 ├── tsconfig.json
@@ -220,7 +229,6 @@ background-job-scheduler/
 | `npm run start:worker` | Worker process (builds then watches with `node --watch`) |
 | `npm run start:worker:prod` | Production worker (`node dist/worker.main`) |
 | `npm run benchmark` | Heap vs Timing Wheel benchmark |
-| `npm run migration:run` | Run TypeORM migrations |
 | `npm run client:dev` | Vite dev server (port 5173) |
 | `npm run client:build` | Production client build |
 
@@ -238,7 +246,7 @@ background-job-scheduler/
 | `POST` | `/dlq/:id/retry` | Retry a job from DLQ |
 | `GET` | `/events/stream` | SSE event stream (real-time updates) |
 | `GET` | `/docs` | Swagger UI |
-| `GET` | `/health` | Health check (Redis + DB) |
+| `GET` | `/health` | Health check (Redis) |
 
 ## Additional Documentation
 
