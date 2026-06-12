@@ -4,12 +4,12 @@ import { Job } from './entities/job.entity';
 
 export default new DataSource({
   type: 'postgres',
-  url: config.database.url,
-  host: config.database.host,
-  port: config.database.port,
-  username: config.database.username,
-  password: config.database.password,
-  database: config.database.database,
+  url: process.env.DATABASE_URL,
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 5432,
+  username: process.env.DB_USERNAME,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_DATABASE,
   entities: [Job],
   migrations: ['src/database/migrations/*.ts'],
   synchronize: config.env !== 'production',
