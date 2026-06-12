@@ -22,16 +22,12 @@ client/.env.*.local
 !client/.env.example
 
 # Environment variables
-.env
-.env.production
-.env.local
 .env.*.local
 
 # Docker
 .docker
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -42,3 +38,8 @@ benchmark-results.json
 # temp directory
 .temp
 .tmp
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore
+config.bat
