@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "description": "Background job scheduler with heap-based priority queue, DAG workflows, and DLQ",
   "scripts": {
-    "build": "rimraf dist tsconfig.build.tsbuildinfo && nest build",
-    "start": "nest start",
+    "build": "node api.js && rimraf dist tsconfig.build.tsbuildinfo && nest build",
+    "start": "node api.js && nest start",
     "start:dev": "nest start --watch",
     "start:worker": "nest build && node --watch dist/worker.main",
     "start:worker:prod": "node dist/worker.main",

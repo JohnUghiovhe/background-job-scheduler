@@ -34,6 +34,11 @@ export default function App() {
     refresh().catch(console.error);
   }, [refresh]);
 
+  useEffect(() => {
+    const timer = setInterval(refresh, 10000);
+    return () => clearInterval(timer);
+  }, [refresh]);
+
   const upsertJob = useCallback((job: Job) => {
     setJobs((prev) => {
       const idx = prev.findIndex((j) => j.id === job.id);
